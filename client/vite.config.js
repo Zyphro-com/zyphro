@@ -7,7 +7,6 @@ export default defineConfig({
   plugins: [
     react(),
     nodePolyfills({
-      // Esto asegura que Buffer y Stream funcionen para el P2P
       globals: {
         Buffer: true,
         global: true,
@@ -16,7 +15,16 @@ export default defineConfig({
     }),
   ],
   define: {
-    // Un parche extra para evitar errores de 'global is not defined'
     global: 'window',
+  },
+  
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000', // El puerto donde correrá tu servidor de Node
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
 })

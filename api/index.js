@@ -8,53 +8,63 @@ import cron from 'node-cron';
 import { rateLimit } from 'express-rate-limit';
 import { prisma } from './db.js';
 
+// --- IMPORTACIÓN DE RUTAS ---
+import stripeRoutes from './_lib/routes/stripeRoutes.js';
+import stripeWebhook from './_lib/routes/stripeWebhook.js';
 import apiKeyRoutes from "./_lib/routes/apiKeyRoutes.js";
 import vortexRoutes from "./_lib/routes/vortexRoutes.js";
 import secretRoutes from './_lib/routes/secrets.js'; 
 import switchRoutes from './_lib/routes/switch.js';
 import mailRoutes from './_lib/routes/mail.js';
+import vaultRoutes from './_lib/routes/vault.js';
+import userRoutes from './_lib/routes/userRoutes.js';
 import { checkDeadManSwitches } from './_lib/utils/deathClock.js';
 
 const app = express();
+BigInt.prototype.toJSON = function() {
+  return this.toString();
+};
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- 1. CONFIGURACIÓN INICIAL ---
+// --- 1. CONFIGURACIÓN INICIAL Y PARSERS ---
 app.set('trust proxy', 1); 
 app.use(cors());
 app.use(morgan('dev'));
 
-// --- 2. RUTA CRÍTICA: ANON MAIL WEBHOOK ---
-// La ponemos ANTES del Rate Limit para que Cloudflare/ngrok no sean bloqueados
-app.use('/api/v1/mail', express.json(), mailRoutes); 
+// Webhook debe ir ANTES de express.json()
+app.use('/api/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 
-// --- 3. 🛡️ CONFIGURACIÓN DE SEGURIDAD (RATE LIMITING) ---
+app.use(express.json({ limit: '10mb' })); 
+
+// --- 2. RUTAS DE SISTEMA Y PAGOS ---
+app.use('/api/stripe', stripeRoutes);
+app.use('/api/v1/user', userRoutes); // <--- REGISTRO DE LA NUEVA RUTA
+
+// --- 3. RUTAS DE SERVICIOS ---
+app.use('/api/v1/mail', mailRoutes); 
+app.use('/api/v1/vault', vaultRoutes);
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 100,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: { error: "Demasiadas peticiones. Inténtalo de nuevo en 15 minutos." }
+  message: { error: "Demasiadas peticiones." }
 });
 
 const createVortexLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   limit: 5, 
-  message: { error: "Límite de creación alcanzado. Seguridad activada por 10 min." }
+  message: { error: "Límite de creación alcanzado." }
 });
 
-// Aplicamos el límite general a todo lo que viene después
 app.use(generalLimiter);
-app.use(express.json({ limit: '10mb' }));
-
-// --- 4. 🛣️ RESTO DE RUTAS DE LA API ---
 app.use("/api/v1/vortex/create", createVortexLimiter); 
 app.use("/api/v1/vortex", vortexRoutes);
 app.use("/api/keys", apiKeyRoutes);
 app.use('/api/messages', secretRoutes); 
 app.use('/api/switch', switchRoutes);
 
-// --- 5. 🌍 CONFIGURACIÓN PARA PRODUCCIÓN ---
+// --- 4. PRODUCCIÓN Y CRON JOBS ---
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../client/dist')));
   app.get('*', (req, res) => {
@@ -64,32 +74,14 @@ if (process.env.NODE_ENV === 'production') {
 
 const PORT = process.env.PORT || 3000;
 
-// --- ⏰ TAREAS AUTOMATIZADAS (CRON JOBS) ---
-if (process.env.NODE_ENV !== 'production') {
-  cron.schedule('* * * * *', () => {
-    checkDeadManSwitches();
-  });
-
-  cron.schedule('*/10 * * * *', async () => {
-    console.log('🛰️ ZYPHRO_CORE: Iniciando purga de nodos expirados...');
-    try {
-      const ahora = new Date();
-      await prisma.anon_aliases.deleteMany({
-        where: { expires_at: { lt: ahora } }
-      });
-    } catch (error) {
-      console.error('❌ ERROR_PURGA:', error);
-    }
-  });
-}
+// CRON: DMS y Purga de Mail
+cron.schedule('* * * * *', () => { checkDeadManSwitches(); });
+cron.schedule('*/10 * * * *', async () => {
+  try {
+    await prisma.anon_aliases.deleteMany({ where: { expires_at: { lt: new Date() } } });
+  } catch (error) { console.error('❌ ERROR_PURGA:', error); }
+});
 
 app.listen(PORT, () => {
-  console.log(`
-  🚀 ZYPHRO CORE BLINDADO
-  ---------------------------
-  🛡️ Webhook Mail: PRIORITARIO
-  📍 Puerto: ${PORT}
-  🔐 Protocolo: XChaCha20-Poly1305
-  ---------------------------
-  `);
+  console.log(`🚀 ZYPHRO CORE BLINDADO | Puerto: ${PORT} | XChaCha20`);
 });

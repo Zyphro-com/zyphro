@@ -1,4 +1,3 @@
-// backend/_lib/routes/mail.js
 import express from 'express';
 import { ClerkExpressRequireAuth } from '@clerk/clerk-sdk-node';
 import { prisma } from '../../db.js';
@@ -6,9 +5,6 @@ import { simpleParser } from 'mailparser';
 
 const router = express.Router();
 
-/**
- * Genera un string aleatorio para el alias
- */
 function generateRandomString(length) {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
@@ -41,31 +37,48 @@ router.get('/aliases', ClerkExpressRequireAuth(), async (req, res) => {
 
     res.json(aliasesWithTime);
   } catch (err) {
-    res.status(500).json({ error: "Error al obtener alias" });
+    res.status(500).json({ error: "Error al obtener alias de identidad" });
   }
 });
 
-// --- 2. RUTA: GENERAR NUEVO ALIAS (CON LÍMITE DE 3) ---
+// --- 2. RUTA: GENERAR NUEVO ALIAS (LÍMITES SEGÚN MATRIZ ZYPHRO) ---
 router.post('/generate', ClerkExpressRequireAuth(), async (req, res) => {
   const { durationMinutes } = req.body;
   const userId = req.auth.userId;
 
   try {
-    // Verificamos el límite de 3 para usuarios FREE
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { plan: true }
+    });
+
     const count = await prisma.anon_aliases.count({
       where: { user_id: userId }
     });
 
-    if (count >= 3) {
+    // 🛡️ APLICACIÓN DE LA MATRIZ DE NEGOCIO
+    if (user?.plan === 'FREE' && count >= 1) {
       return res.status(403).json({ 
-        error: "Límite alcanzado", 
-        message: "Has alcanzado el límite de 3 alias activos. Elimina uno para crear otro." 
+        error: "Límite del Plan FREE alcanzado", 
+        message: "El plan gratuito solo permite 1 alias activo. Sube a PRO para obtener 3." 
       });
     }
 
+    if (user?.plan === 'PRO' && count >= 3) {
+      return res.status(403).json({ 
+        error: "Límite del Plan PRO alcanzado", 
+        message: "Has alcanzado el límite de 3 alias. Sube a ULTIMATE para alias ilimitados." 
+      });
+    }
+
+    // Si es ULTIMATE o no ha llegado al límite, generamos
     const alias = `${generateRandomString(8)}@zyphro.com`;
     const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + (parseInt(durationMinutes) || 60));
+    
+    // Forzamos un máximo de duración de 24h (1440 min) si es FREE para evitar abusos
+    const finalDuration = user?.plan === 'FREE' ? Math.min(parseInt(durationMinutes) || 60, 1440) : (parseInt(durationMinutes) || 60);
+    
+    expiresAt.setMinutes(expiresAt.getMinutes() + finalDuration);
 
     const newAlias = await prisma.anon_aliases.create({
       data: {
@@ -76,8 +89,8 @@ router.post('/generate', ClerkExpressRequireAuth(), async (req, res) => {
     });
     res.json(newAlias);
   } catch (err) {
-    console.error("Error al generar:", err);
-    res.status(500).json({ error: "No se pudo crear el alias" });
+    console.error("Error al generar alias:", err);
+    res.status(500).json({ error: "Fallo en la generación de identidad fantasma" });
   }
 });
 
@@ -87,22 +100,17 @@ router.delete('/aliases/:aliasId', ClerkExpressRequireAuth(), async (req, res) =
   const userId = req.auth.userId;
 
   try {
-    // 1. Borramos primero los mensajes de ese alias (Integridad referencial)
-    await prisma.received_emails.deleteMany({
-      where: { alias_id: parseInt(aliasId) }
-    });
+    const id = parseInt(aliasId);
 
-    // 2. Borramos el alias asegurándonos de que sea del usuario
-    await prisma.anon_aliases.delete({
-      where: { 
-        id: parseInt(aliasId),
-        user_id: userId 
-      }
-    });
+    await prisma.$transaction([
+      prisma.received_emails.deleteMany({ where: { alias_id: id } }),
+      prisma.anon_aliases.delete({
+        where: { id: id, user_id: userId }
+      })
+    ]);
 
-    res.json({ success: true, message: "Nodo de identidad destruido" });
+    res.json({ success: true, message: "Nodo de identidad purgado" });
   } catch (err) {
-    console.error("Error al eliminar alias:", err);
     res.status(500).json({ error: "No se pudo eliminar el alias" });
   }
 });
@@ -117,7 +125,7 @@ router.get('/messages/:aliasId', ClerkExpressRequireAuth(), async (req, res) => 
     });
     res.json(messages);
   } catch (err) {
-    res.status(500).json({ error: "Error al obtener mensajes" });
+    res.status(500).json({ error: "Fallo al interceptar mensajes" });
   }
 });
 
@@ -128,42 +136,42 @@ router.delete('/messages/:messageId', ClerkExpressRequireAuth(), async (req, res
     await prisma.received_emails.delete({
       where: { id: parseInt(messageId) }
     });
-    res.json({ success: true, message: "Correo eliminado" });
+    res.json({ success: true, message: "Rastro de correo eliminado" });
   } catch (err) {
-    res.status(500).json({ error: "No se pudo eliminar el correo" });
+    res.status(500).json({ error: "No se pudo purgar el mensaje" });
   }
 });
 
-// --- 6. RUTA: WEBHOOK (RECEPCIÓN EXTERNA) ---
+// --- 6. RUTA: WEBHOOK (RECEPCIÓN DESDE SERVIDOR DE CORREO) ---
 router.post('/webhook', async (req, res) => {
   const { recipient, sender, 'body-html': rawEmail } = req.body;
   try {
+    const cleanRecipient = recipient.split('<').pop().split('>')[0].toLowerCase().trim();
     const parsed = await simpleParser(rawEmail);
+    
     const aliasNode = await prisma.anon_aliases.findFirst({
-      where: { alias_email: recipient.toLowerCase().trim() }
+      where: { alias_email: cleanRecipient }
     });
 
     if (!aliasNode) return res.status(404).send("Alias inexistente");
 
-    // Bloqueo de recepción si ha expirado
     if (new Date() > new Date(aliasNode.expires_at)) {
-      console.log("⏳ Entrega rechazada: Alias expirado:", recipient);
-      return res.status(410).send("Alias expirado");
+      return res.status(410).send("Nodo expirado");
     }
 
     await prisma.received_emails.create({
       data: {
-        alias_id: Number(aliasNode.id), 
-        from_address: sender || parsed.from?.text || 'Desconocido',
-        subject: parsed.subject || '(Sin asunto)',
-        body_html: parsed.html || parsed.textAsHtml || parsed.text || 'Contenido vacío'
+        alias_id: aliasNode.id, 
+        from_address: sender || parsed.from?.text || 'Remitente Protegido',
+        subject: parsed.subject || '(Sin Asunto)',
+        body_html: parsed.html || parsed.textAsHtml || parsed.text || 'Contenido Cifrado Vacío'
       }
     });
 
     res.status(200).send("OK");
   } catch (err) {
-    console.error("❌ Webhook Error:", err);
-    res.status(500).json({ error: "Error interno" });
+    console.error("❌ Webhook Mail Error:", err);
+    res.status(500).send("Error procesando entrada");
   }
 });
 

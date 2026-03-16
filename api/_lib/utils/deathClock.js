@@ -1,59 +1,74 @@
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../../db.js";
 import { Resend } from 'resend';
-
-const prisma = new PrismaClient();
 
 export const checkDeadManSwitches = async () => {
   const now = new Date();
   
-  // VERIFICACIÓN DE SEGURIDAD: Si no hay API Key, avisamos pero no matamos el servidor
   if (!process.env.RESEND_API_KEY) {
-    console.error("❌ ERROR: RESEND_API_KEY no encontrada en las variables de entorno.");
+    console.error("❌ [VIGÍA] Error: RESEND_API_KEY no configurada.");
     return;
   }
 
   const resend = new Resend(process.env.RESEND_API_KEY);
-  
-  console.log(`⏱️  [VIGÍA] Escaneando sistemas... (${now.toLocaleTimeString()})`);
+  console.log(`⏱️ [VIGÍA] Escaneando latidos del búnker... (${now.toLocaleTimeString()})`);
   
   try {
-    // --- 1. LIMPIEZA DE SEGURIDAD ---
-    const deleted = await prisma.secret.deleteMany({
-      where: {
-        type: 'drop',
-        expiresAt: { lt: now }
-      }
-    });
-    if (deleted.count > 0) console.log(`🧹 Limpieza: ${deleted.count} secretos eliminados.`);
-
-    // --- 2. VIGILANCIA DEL DEAD MAN SWITCH ---
+    // 1. FILTRADO DE SUJETOS EN RIESGO
     const users = await prisma.user.findMany({
       where: {
         switchEnabled: true,
         dmsStatus: { in: ["IDLE", "WARNING"] },
+      },
+      include: {
+        secrets: true 
       }
     });
 
     for (const user of users) {
       if (!user.lastCheckIn || !user.recipientEmail) continue;
 
-      const daysInMs = user.checkInInterval * 24 * 60 * 60 * 1000;
-      const expirationTime = new Date(user.lastCheckIn.getTime() + daysInMs);
+      // Calculamos el intervalo (dmsInterval en horas o checkInInterval en días)
+      // Asumiendo que 'checkInInterval' son días según tu código
+      const intervalMs = user.checkInInterval * 24 * 60 * 60 * 1000;
+      const expirationTime = new Date(user.lastCheckIn.getTime() + intervalMs);
       
       if (now > expirationTime) {
-        console.log(`🚨 DISPARO: Activando protocolo para ${user.email}`);
+        console.log(`🚨 [DMS] PROTOCOLO ACTIVADO para: ${user.email || user.id}`);
+
+        // Construcción de la lista de herencia
+        const listaVortices = user.secrets.map(s => {
+  const tituloLimpio = s.title.replace(/\[HERENCIA\]/g, '').trim();
+  return `<li style="margin-bottom: 10px;">
+            <strong style="color: #2563eb;">${tituloLimpio}</strong><br/>
+            <code style="font-size: 11px; background: #f1f5f9; padding: 2px 5px;">ID: ${s.id}</code>
+          </li>`;
+}).join('');
 
         const { error } = await resend.emails.send({
-          from: 'Zyphro Security <onboarding@resend.dev>',
+          from: 'Zyphro Security <bunker@zyphro.com>', 
           to: user.recipientEmail,
-          subject: '🚨 URGENTE: Protocolo Dead Man Switch Activado',
+          subject: '🚨 ACCESO DE EMERGENCIA: Protocolo Zyphro Activado',
           html: `
-            <div style="font-family: sans-serif; padding: 40px; background-color: #ffffff; color: #0f172a;">
-              <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 40px; border-radius: 24px;">
-                <h1 style="color: #2563eb; font-size: 32px; font-weight: 900; font-style: italic; letter-spacing: -0.05em; margin-bottom: 20px;">ZYPHRO</h1>
-                <p style="font-size: 16px; line-height: 1.6;">Se ha activado un protocolo de seguridad debido a la inactividad prolongada de <strong>${user.email}</strong>.</p>
-                <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 25px; border-radius: 16px; margin: 30px 0; font-family: monospace; font-size: 14px; white-space: pre-wrap;">
-                  ${user.dmsNote || 'El usuario no dejó una nota de texto.'}
+            <div style="font-family: sans-serif; padding: 20px; color: #0f172a; background-color: #f8fafc;">
+              <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; padding: 40px; border-radius: 16px; shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+                <h1 style="color: #2563eb; font-size: 24px; font-weight: 900; font-style: italic; text-transform: uppercase;">ZYPHRO PROTOCOL</h1>
+                <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;"/>
+                <p style="font-size: 16px; line-height: 1.6;">Se ha detectado una inactividad prolongada y falta de respuesta en la cuenta de seguridad de <strong>${user.email || 'Agente Anon'}</strong>.</p>
+                
+                <div style="background: #0f172a; padding: 20px; border-radius: 12px; margin: 25px 0; color: #f8fafc;">
+                  <h3 style="margin-top: 0; color: #3b82f6; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em;">Mensaje Póstumo:</h3>
+                  <p style="font-family: monospace; font-size: 14px; margin-bottom: 0;">"${user.dmsNote || 'El emisor no adjuntó una nota para este activo.'}"</p>
+                </div>
+
+                <h3 style="font-size: 14px; text-transform: uppercase; color: #64748b;">Activos Digitales Liberados:</h3>
+                <ul style="list-style: none; padding: 0;">
+                  ${listaVortices || '<li style="color: #94a3b8;">No se encontraron activos en el búnker de herencia.</li>'}
+                </ul>
+                
+                <div style="margin-top: 40px; padding: 20px; border-top: 1px solid #e2e8f0;">
+                  <p style="font-size: 11px; color: #94a3b8; line-height: 1.5; text-align: center;">
+                    <strong>AVISO DE SEGURIDAD:</strong> Estos activos han sido liberados por inactividad. Zyphro utiliza cifrado XChaCha20 de extremo a extremo. Si el contenido requiere llaves de descifrado, estas deben haber sido proporcionadas por el emisor de forma independiente. Zyphro no tiene acceso a las llaves maestras.
+                  </p>
                 </div>
               </div>
             </div>
@@ -61,17 +76,18 @@ export const checkDeadManSwitches = async () => {
         });
 
         if (!error) {
+          // Desactivamos el switch para evitar bucles de correo
           await prisma.user.update({
             where: { id: user.id },
             data: { dmsStatus: "TRIGGERED", switchEnabled: false }
           });
-          console.log(`✅ Legado entregado a ${user.recipientEmail}`);
+          console.log(`✅ [DMS] Herencia entregada con éxito a: ${user.recipientEmail}`);
         } else {
-          console.error(`❌ Fallo Resend:`, error);
+          console.error("❌ [DMS] Error al enviar email con Resend:", error);
         }
       }
     }
   } catch (error) {
-    console.error("❌ Error en Vigía:", error);
+    console.error("❌ [VIGÍA] Fallo crítico en el escaneo:", error);
   }
 };

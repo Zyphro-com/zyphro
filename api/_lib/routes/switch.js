@@ -1,9 +1,18 @@
 import express from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../db.js';
 import { ClerkExpressRequireAuth } from '@clerk/clerk-sdk-node';
 
 const router = express.Router();
-const prisma = new PrismaClient();
+
+// Helper para evitar el error de BigInt al enviar la respuesta
+const serializeUser = (user) => {
+  if (!user) return null;
+  return {
+    ...user,
+    usedStorage: user.usedStorage?.toString(),
+    storageLimit: user.storageLimit?.toString(),
+  };
+};
 
 // OBTENER CONFIGURACIÓN
 router.get('/config', ClerkExpressRequireAuth(), async (req, res) => {
@@ -11,7 +20,7 @@ router.get('/config', ClerkExpressRequireAuth(), async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { id: req.auth.userId }
     });
-    res.json(user);
+    res.json(serializeUser(user));
   } catch (error) {
     res.status(500).json({ error: "Error al obtener configuración" });
   }
@@ -22,39 +31,32 @@ router.post('/update', ClerkExpressRequireAuth(), async (req, res) => {
   try {
     const { switchEnabled, recipientEmail, checkInInterval, dmsNote } = req.body;
     
-    // ESTO ES PARA DEPURAR: Mira la terminal de tu backend al dar a guardar
-    console.log("📥 Datos recibidos en el servidor:", req.body);
+    console.log("📥 Sincronizando protocolo DMS para:", req.auth.userId);
+
+    
+    const statusValue = switchEnabled ? "IDLE" : "IDLE";
 
     const updated = await prisma.user.update({
       where: { id: req.auth.userId },
       data: { 
-        switchEnabled, 
-        recipientEmail, 
-        checkInInterval: parseInt(checkInInterval),
-        dmsNote: dmsNote, // <--- Asegúrate de que esta línea esté así
+        switchEnabled: Boolean(switchEnabled), 
+        recipientEmail: recipientEmail || null, 
+        checkInInterval: parseInt(checkInInterval) || 30,
+        dmsNote: dmsNote || "", 
         lastCheckIn: new Date(), 
-        dmsStatus: "IDLE" 
+        dmsStatus: statusValue // 👈 Usamos un valor que el Enum sí acepte
       }
     });
     
-    res.json({ success: true, data: updated });
-  } catch (error) {
-    console.error("🔥 Error en el guardado:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-
-// CHECK-IN MANUAL
-router.post('/checkin', ClerkExpressRequireAuth(), async (req, res) => {
-  try {
-    await prisma.user.update({
-      where: { id: req.auth.userId },
-      data: { lastCheckIn: new Date(), dmsStatus: "IDLE" }
+    res.json({ 
+      success: true, 
+      data: serializeUser(updated) 
     });
-    res.json({ success: true });
+
   } catch (error) {
-    res.status(500).json({ success: false });
+    console.error("🔥 Error crítico en el guardado DMS:", error);
+    // Si el error persiste, es que el Enum espera otro nombre (mira tu schema.prisma)
+    res.status(500).json({ success: false, error: "Error de validación de estado" });
   }
 });
 

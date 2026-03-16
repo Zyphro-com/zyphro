@@ -14,26 +14,30 @@ datasource db {
 // ---------------------------------------------------------
 
 model User {
-  id            String   @id // ID de Clerk (user_...)
-  email         String   @unique
-  createdAt     DateTime @default(now())
+  id               String    @id // ID de Clerk
+  email            String    @unique
+  createdAt        DateTime  @default(now())
   
-  // Nivel de Suscripción (Para cobrar a empresas)
-  plan          Plan     @default(FREE)
-  stripeCustomerId String? // Futura integración de pagos
+  // Facturación y Cuotas
+  plan             Plan      @default(FREE)
+  stripeCustomerId String?   @unique
+  usedStorage      BigInt    @default(0)         // Bytes usados (Actualizado por Vortex)
+  storageLimit     BigInt    @default(104857600) // 100MB por defecto
 
-  // Configuración Maestra del Dead Man Switch (DMS)
-  switchEnabled   Boolean   @default(false)
-  recipientEmail  String?
-  checkInInterval Int       @default(30) // Días entre check-ins
-  lastCheckIn     DateTime? @default(now())
-  nextTriggerDate DateTime? // Cuándo se libera el secreto
-  dmsNote         String?   // Mensaje final cifrado
-  dmsStatus       DmsStatus @default(IDLE) // ESTADO DEL INTERRUPTOR
+  // Protocolo Dead Man Switch (DMS)
+  switchEnabled    Boolean   @default(false)
+  recipientEmail   String?
+  checkInInterval  Int       @default(30)      // Días
+  lastCheckIn      DateTime  @default(now())   // Reset con cada login
+  nextTriggerDate  DateTime? 
+  dmsNote          String?   @db.Text
+  dmsStatus        DmsStatus @default(IDLE)
 
   // Relaciones
-  secrets Secret[]
-  apiKeys ApiKey[] // NUEVO: Para que puedan usar el SDK
+  secrets          Secret[]
+  files            FileVortex[]
+  apiKeys          ApiKey[]
+  aliases          anon_aliases[] // Relación con Anon Mail
 }
 
 // ---------------------------------------------------------
@@ -41,19 +45,17 @@ model User {
 // ---------------------------------------------------------
 
 model ApiKey {
-  id           String   @id @default(cuid())
-  key          String   @unique // El "sk_live_..." que le das al desarrollador
-  name         String   // Ej: "Producción App Salud"
-  
-  // Control de Uso (Para limitar y cobrar)
-  isEnabled    Boolean  @default(true)
-  requestsUsed Int      @default(0)
-  requestsLimit Int     @default(1000) // Límite mensual gratuito
-  lastUsedAt   DateTime?
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  key           String   @unique
+  name          String   
+  isEnabled     Boolean  @default(true)
+  requestsUsed  Int      @default(0)
+  requestsLimit Int      @default(1000) 
+  lastUsedAt    DateTime?
+  createdAt     DateTime @default(now())
 
-  userId       String
-  user         User     @relation(fields: [userId], references: [id])
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ---------------------------------------------------------
@@ -61,22 +63,63 @@ model ApiKey {
 // ---------------------------------------------------------
 
 model Secret {
-  id        String   @id @default(cuid())
-  userId    String?  
-  user      User?    @relation(fields: [userId], references: [id])
+  id         String   @id @default(cuid())
+  userId     String?  
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
    
-  title     String   
-  type      String   
-  content   String   
-  nonce     String?  
+  title      String   
+  type       String   // "text", "credentials", etc.
+  content    String   @db.Text
+  nonce      String?  
+
+  fileSize   BigInt   @default(0)
    
-  viewCount Int      @default(0) 
-  maxViews  Int      @default(1) 
+  viewCount  Int      @default(0) 
+  maxViews   Int      @default(1) 
    
-  createdAt DateTime @default(now())
-  // Cambiamos esto para que sea obligatorio en la lógica, 
-  // aunque en la DB pueda ser null inicialmente
-  expiresAt DateTime 
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime 
+}
+
+model FileVortex {
+  id          String   @id @default(cuid())
+  fileName    String   
+  fileSize    BigInt   
+  mimeType    String?
+  s3Key       String   @unique 
+  
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------
+// ANON MAIL (PRIVACIDAD DE CORREO)
+// ---------------------------------------------------------
+
+model anon_aliases {
+  id           Int      @id @default(autoincrement())
+  user_id      String
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  alias_email  String   @unique
+  label        String?
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now())
+  expires_at   DateTime
+
+  emails       received_emails[]
+}
+
+model received_emails {
+  id           Int          @id @default(autoincrement())
+  alias_id     Int
+  alias        anon_aliases @relation(fields: [alias_id], references: [id], onDelete: Cascade)
+  from_address String
+  subject      String?
+  body_html    String       @db.Text
+  received_at  DateTime     @default(now())
 }
 
 // ---------------------------------------------------------
@@ -86,30 +129,11 @@ model Secret {
 enum Plan {
   FREE
   PRO
-  ENTERPRISE
+  ULTIMATE // Este mapea al plan comercial "Ultimate"
 }
 
 enum DmsStatus {
-  IDLE      // Todo bien, esperando
-  WARNING   // Se acerca la fecha, enviando avisos
-  TRIGGERED // El usuario "murió", secretos liberados
-}
-
-model anon_aliases {
-  id           Int      @id @default(autoincrement())
-  user_id      String
-  alias_email  String   @unique
-  label        String?
-  is_active    Boolean  @default(true)
-  created_at   DateTime @default(now())
-  expires_at   DateTime @default(now())
-}
-
-model received_emails {
-  id           Int      @id @default(autoincrement())
-  alias_id     Int
-  from_address String
-  subject      String?
-  body_html    String   @db.Text
-  received_at  DateTime @default(now())
+  IDLE
+  WARNING
+  TRIGGERED
 }

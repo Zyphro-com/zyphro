@@ -1,9 +1,6 @@
 import sodium from 'libsodium-wrappers';
 
-/**
- * Receta Zyphro: XChaCha20-Poly1305
- * Este estándar es el que nos separa de la competencia que usa AES.
- */
+
 const getCrypto = async () => {
     await sodium.ready;
     return sodium;

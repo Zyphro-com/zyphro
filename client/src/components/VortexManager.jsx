@@ -29,7 +29,7 @@ const TimeRemaining = ({ expiresAt }) => {
 export default function VortexManager() {
   const [vortices, setVortices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // all, active, expired
+  const [filter, setFilter] = useState('all'); 
   const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
   const { getToken } = useAuth();
 
@@ -52,21 +52,21 @@ export default function VortexManager() {
 
   // --- LÓGICA DE FILTRADO Y ORDENACIÓN ---
   const processedVortices = useMemo(() => {
-    let items = [...vortices];
+    // ⚡ FILTRO DE SEGURIDAD: Primero quitamos los activos de herencia
+    let items = vortices.filter(v => v.title && !v.title.startsWith("[HERENCIA]"));
 
-    // 1. Filtrar
+    // 1. Filtrar por estado (lo que ya tenías)
     if (filter === 'active') {
       items = items.filter(v => new Date(v.expiresAt) > new Date() && (v.viewCount < v.maxViews));
     } else if (filter === 'expired') {
       items = items.filter(v => new Date(v.expiresAt) <= new Date() || (v.viewCount >= v.maxViews));
     }
 
-    // 2. Ordenar
+    // 2. Ordenar (lo que ya tenías)
     items.sort((a, b) => {
       let aVal = a[sortConfig.key];
       let bVal = b[sortConfig.key];
 
-      // Manejo de fechas para ordenación
       if (sortConfig.key === 'createdAt' || sortConfig.key === 'expiresAt') {
         aVal = new Date(aVal).getTime();
         bVal = new Date(bVal).getTime();
@@ -117,7 +117,6 @@ export default function VortexManager() {
 
   return (
     <div className="space-y-6">
-      {/* HEADER DE CONTROL: Filtros y Estadísticas */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-3xl">
         <div className="flex gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
           {['all', 'active', 'expired'].map((f) => (
@@ -133,11 +132,10 @@ export default function VortexManager() {
           ))}
         </div>
         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-          Mostrando {processedVortices.length} de {vortices.length} Nodos
+          Mostrando {processedVortices.length} Nodos
         </div>
       </div>
 
-      {/* TABLA CON SCROLL INTERNO */}
       <div className="relative bg-white/[0.02] border border-white/5 rounded-[2rem] overflow-hidden">
         <div className="max-h-[500px] overflow-y-auto scrollbar-hide">
           <table className="w-full text-left border-separate border-spacing-0">
@@ -197,7 +195,7 @@ export default function VortexManager() {
         </div>
       </div>
 
-      {vortices.length === 0 && (
+      {processedVortices.length === 0 && (
         <div className="p-20 text-center border border-dashed border-white/5 rounded-[3rem] bg-white/[0.01]">
           <Shield size={40} className="mx-auto text-slate-800 mb-4" />
           <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Protocolo de Bóveda: Sin registros</p>

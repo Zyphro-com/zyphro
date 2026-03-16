@@ -27,6 +27,7 @@
     "libsodium-wrappers": "^0.8.2",
     "mailparser": "^3.9.3",
     "morgan": "^1.10.1",
+    "multer": "^2.1.0",
     "node-cron": "^4.2.1",
     "nodemailer": "^7.0.13",
     "nodemon": "^3.1.0",
