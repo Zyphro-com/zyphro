@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Zap, Clock, RotateCcw, ArrowLeft, Lock, ChevronDown, 
-  Cloud, Mail as MailIcon, Eye, Gauge, ShieldCheck, Link as LinkIcon,
-  FileUp, X, FileText, CheckCircle2, Download
+  ShieldCheck, Link as LinkIcon, FileUp, X, FileText, 
+  CheckCircle2, Download
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-
 import toast from 'react-hot-toast';
 import { cryptoUtils } from '../utils/crypto';
 import { API_URL } from '../apiConfig';
@@ -49,10 +48,8 @@ export default function SecureDrop() {
   const [link, setLink] = useState('');
   const [incomingMsg, setIncomingMsg] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [isServicesOpen, setIsServicesOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   
-
   const hasFetched = useRef(false);
 
   useEffect(() => {
@@ -94,8 +91,8 @@ export default function SecureDrop() {
       const decryptedData = await cryptoUtils.decryptData(data.content, key);
       if (!decryptedData) throw new Error("Llave de desencriptación inválida.");
       
-      // 2. Comprobamos si es archivo o texto para el renderizado final
-      if (data.type === 'file') {
+      // 2. Comprobamos si es archivo o texto (Sincronizado con mayúsculas del backend)
+      if (data.type?.toUpperCase() === 'FILE') {
         const byteCharacters = atob(decryptedData);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
@@ -105,7 +102,7 @@ export default function SecureDrop() {
         const blob = new Blob([byteArray], { type: 'application/octet-stream' });
         
         const downloadUrl = URL.createObjectURL(blob);
-        const cleanFileName = data.title.replace('Archivo: ', '');
+        const cleanFileName = data.fileName || 'archivo_seguro.bin';
         
         setIncomingMsg({ ...data, content: downloadUrl, isFile: true, fileName: cleanFileName });
       } else {
@@ -122,7 +119,6 @@ export default function SecureDrop() {
   };
 
   const handleCreate = async () => {
-    // Validamos según el modo
     if (mode === 'text' && !text) return toast.error("Escribe algo");
     if (mode === 'file' && !file) return toast.error("Selecciona un archivo");
 
@@ -130,11 +126,11 @@ export default function SecureDrop() {
     try {
       const masterKey = await cryptoUtils.generateKey();
       
-      // Usamos FormData para que multer en el backend pueda capturar el archivo
       const formData = new FormData();
-      formData.append('maxViews', maxViews);
-      formData.append('expirationHours', expirationHours);
-      formData.append('type', mode);
+      formData.append('maxViews', maxViews.toString());
+      formData.append('expirationHours', expirationHours.toString());
+      // 🚀 SOLUCIÓN: Enviamos el tipo en MAYÚSCULAS idéntico a lo que espera el backend
+      formData.append('type', mode.toUpperCase()); 
       
       if (mode === 'text') {
         const encryptedBase64 = await cryptoUtils.encryptData(text, masterKey);
@@ -183,20 +179,16 @@ export default function SecureDrop() {
       
       {/* NAVBAR */}
       <nav className="max-w-7xl mx-auto px-6 h-24 flex justify-between items-center relative z-[100]">
-        <Link to="/" className="flex items-center">
+        <Link to="/drop" className="flex items-center">
           <span className="text-3xl font-black italic tracking-tighter text-blue-600 uppercase">ZYPHRO</span>
         </Link>
-        <div className="flex items-center gap-6">
-           <Link to="/dashboard" className="text-[10px] font-black tracking-widest uppercase text-slate-400">Dashboard</Link>
-
+        <div className="text-[10px] font-black tracking-widest uppercase text-blue-500/60 bg-blue-500/5 px-4 py-2 rounded-xl border border-blue-500/10">
+          🔒 Zero-Knowledge Node
         </div>
       </nav>
 
       <main className="flex flex-col items-center justify-center pt-10 pb-20 px-6">
-        <Link to="/dashboard" className="mb-8 flex items-center gap-2 text-slate-600 hover:text-blue-500 font-black text-[10px] tracking-[0.2em] uppercase transition-all">
-          <ArrowLeft size={14} /> Volver al panel
-        </Link>
-
+        
         {/* SELECTOR DE MODO */}
         {!link && !incomingMsg && (
           <div className="flex bg-slate-900/60 p-1 rounded-2xl mb-8 border border-white/5">
@@ -256,7 +248,7 @@ export default function SecureDrop() {
                           </div>
                           <div className="text-center">
                             <p className="text-[10px] font-black uppercase tracking-widest text-blue-100">Arrastra un archivo o haz clic</p>
-                            <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase italic">Máximo 100MB (Plan Free)</p>
+                            <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase italic">Máximo 500MB (Límite Global)</p>
                           </div>
                         </label>
                       ) : (
