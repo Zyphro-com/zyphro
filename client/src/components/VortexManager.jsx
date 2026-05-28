@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Copy, Clock, Trash2, Shield, Eye, ArrowUpDown, Calendar, Filter } from 'lucide-react';
+import { Copy, Clock, Trash2, Shield, Eye, ArrowUpDown, Calendar, FileText, Paperclip, Share2, Box } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from "@clerk/clerk-react";
 import { API_URL } from '../apiConfig';
@@ -9,15 +9,11 @@ const TimeRemaining = ({ expiresAt }) => {
   useEffect(() => {
     const calculateTime = () => {
       const difference = new Date(expiresAt) - new Date();
-      if (difference <= 0) return "Expirado";
+      if (difference <= 0) return "EXTINGUIDO";
       const days = Math.floor(difference / (1000 * 60 * 60 * 24));
       const hours = Math.floor((difference / (1000 * 60 * 60)) % 24);
       const minutes = Math.floor((difference / 1000 / 60) % 60);
-      let text = "";
-      if (days > 0) text += `${days}d `;
-      if (hours > 0 || days > 0) text += `${hours}h `;
-      text += `${minutes}m`;
-      return text;
+      return days > 0 ? `${days}d ${hours}h` : `${hours}h ${minutes}m`;
     };
     setTimeLeft(calculateTime());
     const timer = setInterval(() => setTimeLeft(calculateTime()), 60000);
@@ -36,13 +32,13 @@ export default function VortexManager() {
   const fetchVortices = async () => {
     try {
       const token = await getToken();
-      const res = await fetch(`${API_URL}/api/v1/vortex/user?t=${Date.now()}`, {
+      const res = await fetch(`${API_URL}/api/v1/vortex/user`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       setVortices(Array.isArray(data) ? data : []);
     } catch (err) {
-      toast.error("Error de sincronización");
+      toast.error("Error de sincronización con el motor");
     } finally {
       setLoading(false);
     }
@@ -50,140 +46,135 @@ export default function VortexManager() {
 
   useEffect(() => { fetchVortices(); }, []);
 
-  // --- LÓGICA DE FILTRADO Y ORDENACIÓN ---
+  const formatSize = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   const processedVortices = useMemo(() => {
-    // ⚡ FILTRO DE SEGURIDAD: Primero quitamos los activos de herencia
-    let items = vortices.filter(v => v.title && !v.title.startsWith("[HERENCIA]"));
+    let items = [...vortices];
+    if (filter === 'active') items = items.filter(v => new Date(v.expiresAt) > new Date());
+    if (filter === 'expired') items = items.filter(v => new Date(v.expiresAt) <= new Date());
 
-    // 1. Filtrar por estado (lo que ya tenías)
-    if (filter === 'active') {
-      items = items.filter(v => new Date(v.expiresAt) > new Date() && (v.viewCount < v.maxViews));
-    } else if (filter === 'expired') {
-      items = items.filter(v => new Date(v.expiresAt) <= new Date() || (v.viewCount >= v.maxViews));
-    }
-
-    // 2. Ordenar (lo que ya tenías)
     items.sort((a, b) => {
       let aVal = a[sortConfig.key];
       let bVal = b[sortConfig.key];
-
       if (sortConfig.key === 'createdAt' || sortConfig.key === 'expiresAt') {
         aVal = new Date(aVal).getTime();
         bVal = new Date(bVal).getTime();
       }
-
-      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
+      return sortConfig.direction === 'asc' ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
     });
-
     return items;
   }, [vortices, filter, sortConfig]);
 
-  const requestSort = (key) => {
-    let direction = 'desc';
-    if (sortConfig.key === key && sortConfig.direction === 'desc') {
-      direction = 'asc';
-    }
-    setSortConfig({ key, direction });
-  };
-
   const handleDelete = async (id) => {
-    if (!confirm("¿Deseas destruir este secreto permanentemente?")) return;
+    if (!confirm("¿Desintegrar esta cápsula permanentemente?")) return;
     try {
       const token = await getToken();
-      const res = await fetch(`${API_URL}/api/v1/vortex/delete/${id}`, {
+      const res = await fetch(`${API_URL}/api/v1/vortex/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
         setVortices(vortices.filter(v => v.id !== id));
-        toast.success("Vórtice desintegrado");
+        toast.success("Vórtice colapsado con éxito");
       }
-    } catch (err) { toast.error("Error de conexión"); }
+    } catch (err) { toast.error("Fallo en la purga"); }
   };
 
   const handleCopyLink = (id) => {
-    const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}/drop?id=${id}`;
-    const savedKey = localStorage.getItem(`vortex_key_${id}`);
-    const finalUrl = savedKey ? `${fullUrl}#${savedKey}` : fullUrl;
-    navigator.clipboard.writeText(finalUrl).then(() => {
-      toast.success(savedKey ? "Enlace completo copiado" : "ID copiado (falta Key)", { icon: savedKey ? '🔐' : '🔗' });
+    const fullUrl = `${window.location.origin}/download/${id}`;
+    navigator.clipboard.writeText(fullUrl).then(() => {
+      toast.success("Enlace de acceso copiado", { icon: '🛸' });
     });
   };
 
-  if (loading) return <div className="p-10 text-center animate-pulse text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Accediendo a Bóveda...</div>;
+  if (loading) return <div className="p-20 text-center animate-pulse text-[10px] font-black uppercase tracking-[0.4em] text-blue-500">Sincronizando Órbita...</div>;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-3xl">
-        <div className="flex gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
+      {/* FILTROS TÁCTICOS */}
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-900/40 border border-white/5 p-4 rounded-[2rem] backdrop-blur-md">
+        <div className="flex gap-2 p-1 bg-black/40 rounded-2xl">
           {['all', 'active', 'expired'].map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
-                filter === f ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-slate-500 hover:text-white'
+              className={`px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${
+                filter === f ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'
               }`}
             >
-              {f === 'all' ? 'Todos' : f === 'active' ? 'Activos' : 'Expirados'}
+              {f === 'all' ? 'Cápsulas' : f === 'active' ? 'En Órbita' : 'Extinguidas'}
             </button>
           ))}
         </div>
-        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-          Mostrando {processedVortices.length} Nodos
+        <div className="px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+            <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">
+              Nodos: {processedVortices.length}
+            </span>
         </div>
       </div>
 
-      <div className="relative bg-white/[0.02] border border-white/5 rounded-[2rem] overflow-hidden">
-        <div className="max-h-[500px] overflow-y-auto scrollbar-hide">
-          <table className="w-full text-left border-separate border-spacing-0">
-            <thead className="sticky top-0 bg-[#0a0f1d] z-10 border-b border-white/10">
-              <tr className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                <th className="px-6 py-4 cursor-pointer hover:text-blue-400 transition-colors" onClick={() => requestSort('createdAt')}>
-                  <div className="flex items-center gap-2">Creación <ArrowUpDown size={12}/></div>
-                </th>
-                <th className="px-6 py-4 cursor-pointer hover:text-blue-400 transition-colors" onClick={() => requestSort('viewCount')}>
-                  <div className="flex items-center gap-2">Vistas <ArrowUpDown size={12}/></div>
-                </th>
-                <th className="px-6 py-4 cursor-pointer hover:text-blue-400 transition-colors" onClick={() => requestSort('expiresAt')}>
-                  <div className="flex items-center gap-2">Estado / Expira <ArrowUpDown size={12}/></div>
-                </th>
-                <th className="px-6 py-4 text-right">Acciones</th>
+      {/* TABLA VORTEX */}
+      <div className="bg-slate-900/20 border border-white/5 rounded-[2.5rem] overflow-hidden backdrop-blur-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-white/5 text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">
+                <th className="px-8 py-6">Tipo / Nombre</th>
+                <th className="px-8 py-6">Tamaño</th>
+                <th className="px-8 py-6">Vistas</th>
+                <th className="px-8 py-6">Expiración</th>
+                <th className="px-8 py-6 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {processedVortices.map((v) => {
-                const isExpired = new Date(v.expiresAt) <= new Date() || (v.viewCount >= v.maxViews);
+                const isExpired = new Date(v.expiresAt) <= new Date();
                 return (
-                  <tr key={v.id} className={`group transition-all ${isExpired ? 'bg-rose-500/[0.02] opacity-60' : 'hover:bg-white/[0.04]'}`}>
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-3">
-                        <Calendar size={14} className="text-slate-500" />
-                        <span className="text-[10px] font-bold text-slate-300">
-                          {new Date(v.createdAt).toLocaleDateString()}
-                        </span>
+                  <tr key={v.id} className={`group transition-all ${isExpired ? 'opacity-40 grayscale' : 'hover:bg-white/[0.02]'}`}>
+                    <td className="px-8 py-6">
+                      <div className="flex items-center gap-4">
+                        <div className={`p-3 rounded-2xl ${v.type === 'TEXT' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                          {v.type === 'TEXT' ? <FileText size={18} /> : <Paperclip size={18} />}
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-white uppercase tracking-tight truncate max-w-[150px]">
+                            {v.fileName || "Nota Cifrada"}
+                          </p>
+                          <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                            {new Date(v.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
                       </div>
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-8 py-6">
+                      <span className="text-[10px] font-black text-slate-400">{formatSize(v.fileSize)}</span>
+                    </td>
+                    <td className="px-8 py-6">
                       <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400">
-                        <Eye size={12} /> {v.viewCount} / {v.maxViews}
+                        <Eye size={12} className="text-blue-500/50" /> {v.downloadCount || 0}
                       </div>
                     </td>
-                    <td className="px-6 py-5">
-                      <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-wider ${isExpired ? 'text-rose-500' : 'text-blue-400'}`}>
+                    <td className="px-8 py-6">
+                      <div className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-wider ${isExpired ? 'text-rose-500' : 'text-blue-400'}`}>
                         <Clock size={12} /> 
                         <TimeRemaining expiresAt={v.expiresAt} />
                       </div>
                     </td>
-                    <td className="px-6 py-5 text-right">
-                      <div className="flex justify-end gap-2">
-                        <button onClick={() => handleCopyLink(v.id)} className="p-2.5 bg-white/5 rounded-xl text-slate-400 hover:text-blue-400 hover:bg-blue-400/10 transition-all active:scale-95">
-                          <Copy size={14} />
-                        </button>
-                        <button onClick={() => handleDelete(v.id)} className="p-2.5 bg-white/5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-all active:scale-95">
-                          <Trash2 size={14} />
+                    <td className="px-8 py-6 text-right">
+                      <div className="flex justify-end gap-3">
+                        {!isExpired && (
+                          <button onClick={() => handleCopyLink(v.id)} className="p-3 bg-white/5 rounded-2xl text-slate-400 hover:text-blue-400 hover:bg-blue-400/10 transition-all">
+                            <Share2 size={16} />
+                          </button>
+                        )}
+                        <button onClick={() => handleDelete(v.id)} className="p-3 bg-white/5 rounded-2xl text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-all">
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </td>
@@ -193,14 +184,14 @@ export default function VortexManager() {
             </tbody>
           </table>
         </div>
+        
+        {processedVortices.length === 0 && (
+          <div className="p-32 text-center">
+            <Box size={48} className="mx-auto text-slate-800 mb-6 opacity-20" />
+            <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em]">Sin cápsulas activas en este sector</p>
+          </div>
+        )}
       </div>
-
-      {processedVortices.length === 0 && (
-        <div className="p-20 text-center border border-dashed border-white/5 rounded-[3rem] bg-white/[0.01]">
-          <Shield size={40} className="mx-auto text-slate-800 mb-4" />
-          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Protocolo de Bóveda: Sin registros</p>
-        </div>
-      )}
     </div>
   );
 }

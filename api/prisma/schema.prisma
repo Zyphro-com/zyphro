@@ -5,135 +5,30 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 // ---------------------------------------------------------
-// INFRAESTRUCTURA DE USUARIO Y FACTURACIÓN
+// EL MOTOR VORTEX (ARCHIVOS Y TEXTO) - Simplificado
 // ---------------------------------------------------------
 
-model User {
-  id               String    @id // ID de Clerk
-  email            String    @unique
-  createdAt        DateTime  @default(now())
-  
-  // Facturación y Cuotas
-  plan             Plan      @default(FREE)
-  stripeCustomerId String?   @unique
-  usedStorage      BigInt    @default(0)         // Bytes usados (Actualizado por Vortex)
-  storageLimit     BigInt    @default(104857600) // 100MB por defecto
-
-  // Protocolo Dead Man Switch (DMS)
-  switchEnabled    Boolean   @default(false)
-  recipientEmail   String?
-  checkInInterval  Int       @default(30)      // Días
-  lastCheckIn      DateTime  @default(now())   // Reset con cada login
-  nextTriggerDate  DateTime? 
-  dmsNote          String?   @db.Text
-  dmsStatus        DmsStatus @default(IDLE)
-
-  // Relaciones
-  secrets          Secret[]
-  files            FileVortex[]
-  apiKeys          ApiKey[]
-  aliases          anon_aliases[] // Relación con Anon Mail
-}
-
-// ---------------------------------------------------------
-// INFRAESTRUCTURA B2B (API KEYS & SDK)
-// ---------------------------------------------------------
-
-model ApiKey {
+model Vortex {
   id            String   @id @default(cuid())
-  key           String   @unique
-  name          String   
-  isEnabled     Boolean  @default(true)
-  requestsUsed  Int      @default(0)
-  requestsLimit Int      @default(1000) 
-  lastUsedAt    DateTime?
+
+  // Contenido
+  type          String   @default("FILE")
+  fileName      String?
+  fileSize      BigInt
+  mimeType      String?
+
+  // Seguridad xChaCha20
+  s3Key         String?  @unique
+  textContent   String?
+
+  // Control de Vida
   createdAt     DateTime @default(now())
-
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-// ---------------------------------------------------------
-// EL NÚCLEO (VÓRTICES Y SECRETOS)
-// ---------------------------------------------------------
-
-model Secret {
-  id         String   @id @default(cuid())
-  userId     String?  
-  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-   
-  title      String   
-  type       String   // "text", "credentials", etc.
-  content    String   @db.Text
-  nonce      String?  
-
-  fileSize   BigInt   @default(0)
-   
-  viewCount  Int      @default(0) 
-  maxViews   Int      @default(1) 
-   
-  createdAt  DateTime @default(now())
-  expiresAt  DateTime 
-}
-
-model FileVortex {
-  id          String   @id @default(cuid())
-  fileName    String   
-  fileSize    BigInt   
-  mimeType    String?
-  s3Key       String   @unique 
-  
-  createdAt   DateTime @default(now())
-  expiresAt   DateTime
-  
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-// ---------------------------------------------------------
-// ANON MAIL (PRIVACIDAD DE CORREO)
-// ---------------------------------------------------------
-
-model anon_aliases {
-  id           Int      @id @default(autoincrement())
-  user_id      String
-  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  alias_email  String   @unique
-  label        String?
-  is_active    Boolean  @default(true)
-  created_at   DateTime @default(now())
-  expires_at   DateTime
-
-  emails       received_emails[]
-}
-
-model received_emails {
-  id           Int          @id @default(autoincrement())
-  alias_id     Int
-  alias        anon_aliases @relation(fields: [alias_id], references: [id], onDelete: Cascade)
-  from_address String
-  subject      String?
-  body_html    String       @db.Text
-  received_at  DateTime     @default(now())
-}
-
-// ---------------------------------------------------------
-// ENUMS (ESTADOS Y PLANES)
-// ---------------------------------------------------------
-
-enum Plan {
-  FREE
-  PRO
-  ULTIMATE // Este mapea al plan comercial "Ultimate"
-}
-
-enum DmsStatus {
-  IDLE
-  WARNING
-  TRIGGERED
+  expiresAt     DateTime
+  maxViews      Int      @default(1)
+  downloadCount Int      @default(0)
 }

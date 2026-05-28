@@ -1,233 +1,102 @@
 import { prisma } from "../../db.js";
-import { checkDeadManSwitches } from '../utils/deathClock.js';
 import fs from 'fs';
 import path from 'path';
 
-// --- CREAR VÓRTICE (SEGURIDAD, CUOTAS Y LÍMITES POR PLAN) ---
+const MAX_FILE_SIZE = BigInt(500 * 1024 * 1024); // 500MB
+
 export const createVortex = async (req, res) => {
   try {
-    const userId = req.auth?.userId || null;
     let { content, type, expirationHours, maxViews, fileName } = req.body;
     const file = req.file;
 
-    if (type === 'text' && !content) return res.status(400).json({ error: "Falta el contenido." });
-    if (type === 'file' && !file) return res.status(400).json({ error: "Archivo no recibido." });
+    type = (type || (file ? 'FILE' : 'TEXT')).toUpperCase();
 
-    const sizeInBytes = type === 'file' ? file.size : Buffer.byteLength(content, 'utf8');
+    if (type === 'TEXT' && !content) return res.status(400).json({ error: "Contenido vacío." });
+    if (type === 'FILE' && !file) return res.status(400).json({ error: "Archivo no detectado." });
 
-    const result = await prisma.$transaction(async (tx) => {
-      let user = null;
-      if (userId) {
-        user = await tx.user.findUnique({ where: { id: userId } });
-        
-        // Si no existe (raro), lo creamos como FREE
-        if (!user) {
-          user = await tx.user.create({
-            data: { 
-              id: userId, 
-              email: `${userId}@zyphro.local`, 
-              plan: "FREE", 
-              storageLimit: BigInt(104857600) 
-            }
-          });
-        }
+    const sizeInBytes = type === 'FILE' ? BigInt(file.size) : BigInt(Buffer.byteLength(content || '', 'utf8'));
 
-        // VALIDACIÓN DE CUOTA
-        if (BigInt(user.usedStorage) + BigInt(sizeInBytes) > BigInt(user.storageLimit)) {
-          throw new Error("QUOTA_EXCEEDED");
-        }
+    if (sizeInBytes > MAX_FILE_SIZE) {
+      if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      return res.status(400).json({ error: "El archivo supera el límite técnico de 500MB." });
+    }
+
+    const parsedExpiration = parseInt(expirationHours) || 24;
+    const parsedMaxViews = parseInt(maxViews) || 1;
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + parsedExpiration);
+
+    const newVortex = await prisma.vortex.create({
+      data: {
+        type,
+        fileName: type === 'FILE' ? (fileName || file.originalname) : "nota_cifrada.txt",
+        fileSize: sizeInBytes,
+        mimeType: type === 'FILE' ? file.mimetype : "text/plain",
+        s3Key: type === 'FILE' ? file.path : null,
+        textContent: type === 'TEXT' ? content : null,
+        expiresAt,
+        maxViews: parsedMaxViews,
       }
-
-      // 🛡️ APLICAR REGLAS SEGÚN PLAN
-      const isFree = !user || user.plan === "FREE";
-      
-      if (isFree) {
-        expirationHours = 24; // Forzado 24h para Free
-        maxViews = 1;        // Forzado 1 vista para Free
-      } else {
-        // Planes de pago: Pro y Ultimate (Máx 30 días = 720h)
-        expirationHours = Math.min(parseInt(expirationHours) || 24, 720);
-        maxViews = Math.min(parseInt(maxViews) || 1, 100);
-      }
-
-      const expiresAt = new Date();
-      expiresAt.setHours(expiresAt.getHours() + expirationHours);
-
-      const newSecret = await tx.secret.create({
-        data: {
-          userId: userId,
-          title: type === 'file' ? `Archivo: ${fileName || file.originalname}` : "Secure Drop",
-          type: type || "text",
-          content: type === 'file' ? file.path : content,
-          fileSize: BigInt(sizeInBytes),
-          expiresAt: expiresAt,
-          maxViews: maxViews,
-          viewCount: 0
-        }
-      });
-
-      if (userId) {
-        await tx.user.update({
-          where: { id: userId },
-          data: { usedStorage: { increment: sizeInBytes } }
-        });
-      }
-      return newSecret;
     });
 
-    res.status(200).json({ success: true, vortexId: result.id });
-
+    return res.status(200).json({ success: true, vortexId: newVortex.id });
   } catch (error) {
-    if (error.message === "QUOTA_EXCEEDED") {
-      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(402).json({ error: "Búnker lleno. Sube de nivel para obtener más espacio." });
-    }
-    console.error("❌ Error createVortex:", error);
-    res.status(500).json({ error: "Error interno del servidor" });
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    console.error("❌ ERROR_VORTEX_ENGINE:", error);
+    return res.status(500).json({ error: "Fallo interno en el motor de cifrado." });
   }
 };
 
-// --- LEER Y DESTRUIR ---
 export const getVortex = async (req, res) => {
   try {
     const { id } = req.params;
-    const secret = await prisma.secret.findUnique({ where: { id } });
+    const vortex = await prisma.vortex.findUnique({ where: { id } });
 
-    if (!secret) return res.status(404).json({ error: "Vórtice no disponible" });
+    if (!vortex) return res.status(404).json({ error: "Cápsula no encontrada o ya desintegrada." });
 
-    const destroySecret = async () => {
+    const desintegrate = async () => {
       try {
-        await prisma.$transaction(async (tx) => {
-          await tx.secret.delete({ where: { id } });
-          if (secret.userId) {
-            await tx.user.update({
-              where: { id: secret.userId },
-              data: { usedStorage: { decrement: secret.fileSize || 0 } }
-            });
-          }
-        });
-        if (secret.type === 'file' && fs.existsSync(secret.content)) {
-          fs.unlinkSync(secret.content);
+        await prisma.vortex.delete({ where: { id } });
+        if (vortex.type === 'FILE' && vortex.s3Key && fs.existsSync(vortex.s3Key)) {
+          fs.unlinkSync(vortex.s3Key);
         }
-      } catch (e) { console.error("Error destruyendo rastro:", e); }
+      } catch (e) { console.error("Error en purga:", e); }
     };
 
-    // Comprobar expiración
-    if (new Date() > new Date(secret.expiresAt) || (secret.maxViews > 0 && secret.viewCount >= secret.maxViews)) {
-      await destroySecret();
-      return res.status(404).json({ error: "El vórtice ha expirado." });
+    if (new Date() > new Date(vortex.expiresAt)) {
+      await desintegrate();
+      return res.status(410).json({ error: "Cápsula expirada por límite de tiempo." });
     }
 
-    let responseContent = secret.content;
-    if (secret.type === 'file') {
+    let content = vortex.textContent;
+    if (vortex.type === 'FILE') {
       try {
-        responseContent = fs.readFileSync(path.resolve(secret.content), 'utf-8');
+        content = fs.readFileSync(path.resolve(vortex.s3Key), 'utf-8');
       } catch (err) {
-        return res.status(404).json({ error: "Contenido no accesible." });
+        return res.status(404).json({ error: "Archivo físico no encontrado." });
       }
     }
 
-    const updatedSecret = await prisma.secret.update({
+    const updated = await prisma.vortex.update({
       where: { id },
-      data: { viewCount: { increment: 1 } }
-    });
-    
-    if (updatedSecret.viewCount >= secret.maxViews) await destroySecret();
-
-    res.json({
-      title: secret.title,
-      type: secret.type,
-      content: responseContent,
-      expiresAt: secret.expiresAt,
-      remainingViews: Math.max(0, secret.maxViews - updatedSecret.viewCount)
+      data: { downloadCount: { increment: 1 } }
     });
 
-  } catch (error) {
-    res.status(500).json({ error: "Error al recuperar el búnker." });
-  }
-};
-
-// --- OBTENER VÓRTICES (FILTRADO) ---
-export const getUserVortices = async (req, res) => {
-  try {
-    if (!req.auth?.userId) return res.status(401).json({ error: "No autorizado" });
-    const { userId } = req.auth;
-
-    const vortices = await prisma.secret.findMany({
-      where: { 
-        userId,
-        NOT: { title: { startsWith: "[HERENCIA]" } }
-      },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        title: true,
-        type: true,
-        expiresAt: true,
-        maxViews: true,
-        viewCount: true,
-        createdAt: true,
-        fileSize: true
-      }
-    });
-
-    res.json(vortices);
-  } catch (error) {
-    res.status(500).json({ error: "Error al recuperar tus activos." });
-  }
-};
-
-// --- HEARTBEAT ---
-export const heartbeat = async (req, res) => {
-  try {
-    const userId = req.auth?.userId;
-    if (!userId) return res.status(401).json({ error: "No autorizado" });
-    
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { lastCheckIn: new Date(), dmsStatus: "IDLE" }
-    });
-    
-    const nextCheckIn = new Date(updatedUser.lastCheckIn.getTime() + (updatedUser.checkInInterval || 24) * 60 * 60 * 1000);
-    res.json({ success: true, lastCheckIn: updatedUser.lastCheckIn, nextCheckInDue: nextCheckIn });
-  } catch (error) {
-    res.status(500).json({ error: "Fallo de sincronización." });
-  }
-};
-
-// --- MANTENIMIENTO ---
-export const cleanupVortices = async (req, res) => {
-  try {
-    const now = new Date();
-    const expired = await prisma.secret.findMany({
-      where: { 
-        OR: [
-          { expiresAt: { lt: now } },
-          { AND: [{ maxViews: { gt: 0 } }, { viewCount: { gte: prisma.secret.fields.maxViews } }] }
-        ]
-      }
-    });
-
-    for (const secret of expired) {
-      await prisma.$transaction(async (tx) => {
-        const exists = await tx.secret.findUnique({ where: { id: secret.id } });
-        if (exists) {
-          await tx.secret.delete({ where: { id: secret.id } });
-          if (secret.userId) {
-            await tx.user.update({
-              where: { id: secret.userId },
-              data: { usedStorage: { decrement: secret.fileSize || 0 } }
-            });
-          }
-        }
-      });
-      if (secret.type === 'file' && fs.existsSync(secret.content)) {
-        try { fs.unlinkSync(secret.content); } catch (e) {}
-      }
+    if (updated.downloadCount >= updated.maxViews) {
+      await desintegrate();
     }
-    await checkDeadManSwitches();
-    res.json({ success: true, cleared: expired.length });
+
+    return res.json({
+      fileName: vortex.fileName,
+      type: vortex.type,
+      content,
+      expiresAt: vortex.expiresAt,
+      downloadCount: updated.downloadCount,
+      remainingViews: Math.max(0, (updated.maxViews - updated.downloadCount))
+    });
+
   } catch (error) {
-    res.status(500).json({ error: "Error en mantenimiento." });
+    console.error("❌ ERROR_GET_VORTEX:", error);
+    return res.status(500).json({ error: "Fallo al acceder al nodo." });
   }
 };

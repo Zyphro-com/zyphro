@@ -5,7 +5,7 @@ import {
   FileUp, X, FileText, CheckCircle2, Download
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { SignedIn, UserButton, useAuth } from "@clerk/clerk-react"; 
+
 import toast from 'react-hot-toast';
 import { cryptoUtils } from '../utils/crypto';
 import { API_URL } from '../apiConfig';
@@ -52,7 +52,7 @@ export default function SecureDrop() {
   const [isServicesOpen, setIsServicesOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   
-  const { getToken } = useAuth(); 
+
   const hasFetched = useRef(false);
 
   useEffect(() => {
@@ -82,7 +82,7 @@ export default function SecureDrop() {
   const fetchAndDecryptMessage = async (id, key) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/v1/vortex/get/${id}`);
+      const res = await fetch(`${API_URL}/api/v1/vortex/${id}`);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.error || "Mensaje destruido o inexistente.");
@@ -128,7 +128,6 @@ export default function SecureDrop() {
 
     setLoading(true);
     try {
-      const token = await getToken(); 
       const masterKey = await cryptoUtils.generateKey();
       
       // Usamos FormData para que multer en el backend pueda capturar el archivo
@@ -156,10 +155,6 @@ export default function SecureDrop() {
       
       const res = await fetch(`${API_URL}/api/v1/vortex/create`, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`
-          // Nota: No incluimos 'Content-Type' aquí, fetch lo genera automáticamente con FormData
-        },
         body: formData
       });
       
@@ -193,7 +188,7 @@ export default function SecureDrop() {
         </Link>
         <div className="flex items-center gap-6">
            <Link to="/dashboard" className="text-[10px] font-black tracking-widest uppercase text-slate-400">Dashboard</Link>
-           <SignedIn><UserButton afterSignOutUrl="/" /></SignedIn>
+
         </div>
       </nav>
 
@@ -286,9 +281,11 @@ export default function SecureDrop() {
                     <div>
                       <label className={labelStyle}><Eye size={12}/> Lecturas</label>
                       <div className="relative">
-                        <select value={maxViews} onChange={(e) => setMaxViews(e.target.value)} className={selectStyle}>
+                        <select value={maxViews} onChange={(e) => setMaxViews(parseInt(e.target.value))} className={selectStyle}>
                           <option value="1">1 Solo Uso</option>
                           <option value="5">5 Visitas</option>
+                          <option value="10">10 Visitas</option>
+                          <option value="100">100 Visitas</option>
                         </select>
                         <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none" />
                       </div>
@@ -296,7 +293,7 @@ export default function SecureDrop() {
                     <div>
                       <label className={labelStyle}><Clock size={12}/> Expiración</label>
                       <div className="relative">
-                        <select value={expirationHours} onChange={(e) => setExpirationHours(e.target.value)} className={selectStyle}>
+                        <select value={expirationHours} onChange={(e) => setExpirationHours(parseInt(e.target.value))} className={selectStyle}>
                           <option value="1">1 Hora</option>
                           <option value="24">24 Horas</option>
                         </select>
