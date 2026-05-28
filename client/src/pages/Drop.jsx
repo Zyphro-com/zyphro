@@ -79,7 +79,14 @@ export default function SecureDrop() {
   const fetchAndDecryptMessage = async (id, key) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/v1/vortex/${id}`);
+      // 🚀 SOLUCIÓN 405: Forzamos método GET y cabeceras claras
+      const res = await fetch(`${API_URL}/api/v1/vortex/${id}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.error || "Mensaje destruido o inexistente.");
@@ -111,7 +118,7 @@ export default function SecureDrop() {
 
     } catch (err) { 
       console.error("Vortex Error:", err);
-      toast.error(err.message); 
+      toast.error(err.message || "Error al acceder a la cápsula."); 
       setTimeout(() => { window.location.href = '/drop'; }, 3000);
     } finally { 
       setLoading(false); 
@@ -129,7 +136,6 @@ export default function SecureDrop() {
       const formData = new FormData();
       formData.append('maxViews', maxViews.toString());
       formData.append('expirationHours', expirationHours.toString());
-      // 🚀 SOLUCIÓN: Enviamos el tipo en MAYÚSCULAS idéntico a lo que espera el backend
       formData.append('type', mode.toUpperCase()); 
       
       if (mode === 'text') {
@@ -149,6 +155,7 @@ export default function SecureDrop() {
         toast.success("Cifrado completado", { id: 'encrypt' });
       }
       
+      // 🚀 Forzamos POST (Ya lo tenías bien, pero aseguramos)
       const res = await fetch(`${API_URL}/api/v1/vortex/create`, {
         method: 'POST',
         body: formData
