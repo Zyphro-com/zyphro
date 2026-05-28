@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Zap, Clock, RotateCcw, ArrowLeft, Lock, ChevronDown, 
   ShieldCheck, Link as LinkIcon, FileUp, X, FileText, 
-  CheckCircle2, Download
+  CheckCircle2, Download, Eye
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
