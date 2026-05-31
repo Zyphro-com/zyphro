@@ -8,19 +8,7 @@
   ],
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api" 
-    },
-    {
-      "source": "/assets/(.*)",
-      "destination": "/assets/$1"
-    },
-    {
-      "source": "/(.*)\\.(png|jpg|jpeg|gif|svg|ico|css|js)",
-      "destination": "/$1.$2"
-    },
-    {
-      "source": "/((?!api/|assets/|.*\\..*).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
