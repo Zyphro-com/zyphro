@@ -1,16 +1,13 @@
 import express from "express";
 import multer from 'multer';
-import fs from 'fs';
+// ❌ Borramos la importación de 'fs' porque en Vercel no se pueden crear carpetas
 import { createVortex, getVortex } from "../controllers/vortexController.js";
 
-// Configuración de Multer para subidas temporales (se borran tras cifrar)
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads');
-}
-
+// ✅ CONFIGURACIÓN PARA VERCEL: 
+// La única carpeta donde Vercel nos deja guardar cosas temporales es en '/tmp/'
 const upload = multer({ 
-  dest: 'uploads/',
-  limits: { fileSize: 50 * 1024 * 1024 * 1024 } // 50GB
+  dest: '/tmp/',
+  limits: { fileSize: 50 * 1024 * 1024 } // Límite de 50MB (Para evitar bloqueos de Vercel)
 });
 
 const router = express.Router();
