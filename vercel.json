@@ -1,18 +1,7 @@
 {
-  "version": 2,
-  "crons": [
-    {
-      "path": "/api/v1/vortex/cleanup",
-      "schedule": "0 4 * * *"
-    }
-  ],
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/((?!api/|assets/|.*\\..*).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
