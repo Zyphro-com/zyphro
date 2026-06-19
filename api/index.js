@@ -7,26 +7,35 @@ import vortexRoutes from "./_lib/routes/vortexRoutes.js";
 
 const app = express();
 
+// Solución para que Prisma procese los números BigInt en los JSON
 BigInt.prototype.toJSON = function() { 
   return this.toString(); 
 };
 
+// 🚀 CONFIGURACIÓN CORS UNIFICADA Y SEGURA
+const allowedOrigins = [
+  process.env.FRONTEND_URL, 
+  'http://localhost:5173',  
+  'https://zyphro.com',
+  'https://www.zyphro.com'
+].filter(Boolean);
+
 app.use(cors({ 
-  origin: [
-    process.env.FRONTEND_URL, 
-    'http://localhost:5173',  
-    'https://zyphro.com',
-    'https://www.zyphro.com'
-  ].filter(Boolean), 
+  origin: allowedOrigins, 
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   credentials: true 
 }));
+
+// Responder automáticamente a las peticiones de pre-vuelo (OPTIONS) antes de las rutas
+app.options('*', cors());
 
 app.use(express.json({ limit: '50mb' })); 
 
 // --- RUTAS MAESTRAS ---
 app.use('/api/v1/vortex', vortexRoutes);  
 
-// --- ENDPOINT PARA EL CRON JOB DE VERCEL ---
+// --- ENDPOINT PARA EL CRON JOB ---
 app.get('/api/v1/vortex/cleanup', async (req, res) => {
   try {
     const deleted = await prisma.vortex.deleteMany({
@@ -38,21 +47,7 @@ app.get('/api/v1/vortex/cleanup', async (req, res) => {
   }
 });
 
-if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`🛸 ZYPHRO VORTEX ENGINE | LOCAL ONLINE EN PUERTO ${PORT}`);
-  });
-}
-
-// 🚀 VITAL PARA VERCEL: Apagamos su analizador automático 
-// para que no rompa los archivos de Multer al subirlos.
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
+// 🚀 UN SÓLO LISTENER PARA TODO (Funciona en Local y en Render)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🛸 ZYPHRO VORTEX ENGINE | ONLINE EN PUERTO ${PORT}`);
