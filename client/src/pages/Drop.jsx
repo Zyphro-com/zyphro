@@ -8,10 +8,9 @@ import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { cryptoUtils } from '../utils/crypto';
 
-// 🚀 APUNTAMOS DIRECTAMENTE AL MOTOR DE RENDER (Adiós intermediarios y adiós 405)
-const BACKEND_URL = 'https://zyphro-backend-kghc.onrender.com';
+const BACKEND_URL = 'https://zyph-backend-kghc.onrender.com';
 
-// --- COMPONENTE DEL TEMPORIZADOR ---
+
 const CountdownTimer = ({ expiresAt }) => {
   const [timeLeft, setTimeLeft] = useState('');
   useEffect(() => {
