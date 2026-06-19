@@ -7,7 +7,9 @@ import {
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { cryptoUtils } from '../utils/crypto';
-import { API_URL } from '../apiConfig';
+
+// 🚀 APUNTAMOS DIRECTAMENTE AL MOTOR DE RENDER (Adiós intermediarios y adiós 405)
+const BACKEND_URL = 'https://zyphro-backend-kghc.onrender.com';
 
 // --- COMPONENTE DEL TEMPORIZADOR ---
 const CountdownTimer = ({ expiresAt }) => {
@@ -79,8 +81,8 @@ export default function SecureDrop() {
   const fetchAndDecryptMessage = async (id, key) => {
     setLoading(true);
     try {
-      // 🚀 SOLUCIÓN 405: Forzamos método GET y cabeceras claras
-      const res = await fetch(`${API_URL}/api/v1/vortex/${id}`, {
+      // 🚀 CONECTADO A RENDER (GET)
+      const res = await fetch(`${BACKEND_URL}/api/v1/vortex/${id}`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json'
@@ -155,8 +157,8 @@ export default function SecureDrop() {
         toast.success("Cifrado completado", { id: 'encrypt' });
       }
       
-      // 🚀 Forzamos POST (Ya lo tenías bien, pero aseguramos)
-      const res = await fetch(`${API_URL}/api/v1/vortex/create`, {
+      // 🚀 CONECTADO A RENDER (POST MULTIPART)
+      const res = await fetch(`${BACKEND_URL}/api/v1/vortex/create`, {
         method: 'POST',
         body: formData
       });
