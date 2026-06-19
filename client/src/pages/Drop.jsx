@@ -186,14 +186,12 @@ export default function SecureDrop() {
     <div className="min-h-screen bg-[#020617] text-white font-sans selection:bg-blue-500/30 overflow-x-hidden relative">
       
       {/* NAVBAR */}
-      <nav className="max-w-7xl mx-auto px-6 h-24 flex justify-between items-center relative z-[100]">
-        <Link to="/drop" className="flex items-center">
-          <span className="text-3xl font-black italic tracking-tighter text-blue-600 uppercase">ZYPHRO</span>
-        </Link>
-        <div className="text-[10px] font-black tracking-widest uppercase text-blue-500/60 bg-blue-500/5 px-4 py-2 rounded-xl border border-blue-500/10">
-          🔒 Zero-Knowledge Node
-        </div>
-      </nav>
+<nav className="max-w-7xl mx-auto px-6 h-24 flex justify-between items-center relative z-[100]">
+  {/* 🚀 CORREGIDO: Cambiado to="/drop" por to="/" para volver a la página principal */}
+  <Link to="/" className="flex items-center">
+    <span className="text-3xl font-black italic tracking-tighter text-blue-600 uppercase">ZYPHRO</span>
+  </Link>
+</nav>
 
       <main className="flex flex-col items-center justify-center pt-10 pb-20 px-6">
         
